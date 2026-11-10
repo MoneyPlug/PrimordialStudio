@@ -4,6 +4,7 @@ import type { CreatureSDFParams } from '../sdf/creatureSdf';
 import { generateCreatureGeometry } from '../sdf/marchingCubes';
 import type { Vector3D } from '../xr/webxrTelemetry';
 import { StudioTelemetryBinder } from '../services/studioTelemetryBinder';
+import type { OrbitCameraKeyframe } from '../services/cinematicOrbit';
 
 interface RaymarchingViewportProps {
   glslCode: string;
@@ -12,6 +13,7 @@ interface RaymarchingViewportProps {
   entropy: number;
   latencyMs: number;
   showMeshOverlay?: boolean;
+  cameraOrbit?: OrbitCameraKeyframe;
   onError?: (err: string | null) => void;
 }
 
@@ -22,6 +24,7 @@ export const RaymarchingViewport: React.FC<RaymarchingViewportProps> = ({
   entropy,
   latencyMs,
   showMeshOverlay = true,
+  cameraOrbit,
   onError,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -171,6 +174,15 @@ export const RaymarchingViewport: React.FC<RaymarchingViewportProps> = ({
     materialRef.current.uniforms.u_glowColor.value.set(...creatureParams.glowColor);
     materialRef.current.uniforms.u_creatureBlend.value = creatureParams.smoothBlend;
   }, [entropy, latencyMs, creatureParams]);
+
+  // Update camera orbit angles when keyframe timeline scrubs or plays
+  useEffect(() => {
+    if (!cameraOrbit) return;
+    // Map camera orbit azimuth and elevation into mouse coordinates for GLSL raymarching
+    const normalizedMouseX = ((cameraOrbit.azimuth / (Math.PI * 2)) % 1.0 + 1.0) % 1.0;
+    const normalizedMouseY = Math.max(0.0, Math.min(1.0, (cameraOrbit.elevation + 1.5) / 3.0));
+    mouseRef.current = { x: normalizedMouseX, y: normalizedMouseY };
+  }, [cameraOrbit]);
 
   useEffect(() => {
     if (!materialRef.current) return;
