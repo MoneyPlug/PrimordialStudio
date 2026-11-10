@@ -8,6 +8,12 @@ import { graphToGlsl, glslToGraph } from './compiler/glslTranspiler';
 import { VisualNodeGraph } from './components/VisualNodeGraph';
 import { MonacoGlslEditor } from './components/MonacoGlslEditor';
 import { RaymarchingViewport } from './components/RaymarchingViewport';
+import { MultiModelInspector } from './components/MultiModelInspector';
+import { KeyframeTimeline } from './components/KeyframeTimeline';
+import { PresetLibrarySidebar } from './components/PresetLibrarySidebar';
+import { applySdfOffsets, type DualModelComparativeOffset } from './services/multiModelTelemetry';
+import type { OrbitCameraKeyframe } from './services/cinematicOrbit';
+import type { ArchetypePreset } from './nodes/archetypePresets';
 import {
   Sparkles,
   Radio,
@@ -20,11 +26,14 @@ import {
   Eye,
   Activity,
   Layers,
+  Boxes,
+  ArrowRightLeft,
 } from 'lucide-react';
 
 export const App: React.FC = () => {
   // Navigation / Layout state
   const [activeTab, setActiveTab] = useState<'graph' | 'monaco' | 'split'>('split');
+  const [rightPanelTab, setRightPanelTab] = useState<'telemetry' | 'multimodel' | 'presets'>('multimodel');
   const [showMeshOverlay, setShowMeshOverlay] = useState(false);
 
   // Model & Creature Telemetry State
@@ -42,9 +51,15 @@ export const App: React.FC = () => {
     rawOutput: '',
   });
 
-  const [creatureParams, setCreatureParams] = useState<CreatureSDFParams>(() =>
-    mapMetricsToCreatureSDF(metrics)
-  );
+  const [dualOffsets, setDualOffsets] = useState<DualModelComparativeOffset | null>(null);
+  const [applyOffsetsEnabled, setApplyOffsetsEnabled] = useState(true);
+
+  const [creatureParams, setCreatureParams] = useState<CreatureSDFParams>(() => {
+    return mapMetricsToCreatureSDF(metrics);
+  });
+
+  // Camera Orbit State driven by 10s Timeline
+  const [cameraOrbit, setCameraOrbit] = useState<OrbitCameraKeyframe | undefined>(undefined);
 
   // WebXR & Spatial Audio State
   const [xrTelemetry, setXrTelemetry] = useState<WebXRTelemetryFrame | null>(null);
@@ -93,14 +108,17 @@ export const App: React.FC = () => {
     };
   }, []);
 
-  // Update creature SDF & Spatial Audio on metrics change
+  // Update creature SDF & Spatial Audio on metrics change or dual model offsets change
   useEffect(() => {
-    const params = mapMetricsToCreatureSDF(metrics);
-    setCreatureParams(params);
-    if (audioEngineRef.current) {
-      audioEngineRef.current.syncWithCreatureState(params);
+    let baseParams = mapMetricsToCreatureSDF(metrics);
+    if (dualOffsets && applyOffsetsEnabled) {
+      baseParams = applySdfOffsets(baseParams, dualOffsets);
     }
-  }, [metrics]);
+    setCreatureParams(baseParams);
+    if (audioEngineRef.current) {
+      audioEngineRef.current.syncWithCreatureState(baseParams);
+    }
+  }, [metrics, dualOffsets, applyOffsetsEnabled]);
 
   // Handle Graph change -> Recompile to GLSL
   const handleGraphChange = (newGraph: ShaderGraph) => {
@@ -118,6 +136,13 @@ export const App: React.FC = () => {
     } catch (err: any) {
       setShaderError(err.message || 'GLSL Parse Error');
     }
+  };
+
+  // Handle Preset Selection
+  const handleApplyPreset = (preset: ArchetypePreset) => {
+    setShaderGraph(preset.graph);
+    const code = preset.glsl || graphToGlsl(preset.graph);
+    setGlslCode(code);
   };
 
   // Trigger Ollama / Simulated Inference
@@ -176,6 +201,14 @@ export const App: React.FC = () => {
         {/* View Switcher Tabs */}
         <div className="flex items-center bg-[#151924] p-1 rounded-lg border border-slate-800 text-xs">
           <button
+            onClick={() => setActiveTab('split')}
+            className={`flex items-center gap-1.5 px-3 py-1 rounded cursor-pointer transition ${
+              activeTab === 'split' ? 'bg-cyan-600 text-white font-medium' : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            <Layers className="w-3.5 h-3.5" /> Split Studio
+          </button>
+          <button
             onClick={() => setActiveTab('graph')}
             className={`flex items-center gap-1.5 px-3 py-1 rounded cursor-pointer transition ${
               activeTab === 'graph' ? 'bg-cyan-600 text-white font-medium' : 'text-slate-400 hover:text-white'
@@ -191,13 +224,33 @@ export const App: React.FC = () => {
           >
             <Code2 className="w-3.5 h-3.5" /> Monaco IDE
           </button>
+        </div>
+
+        {/* Right Suite Selector */}
+        <div className="flex items-center bg-[#151924] p-1 rounded-lg border border-slate-800 text-xs">
           <button
-            onClick={() => setActiveTab('split')}
-            className={`flex items-center gap-1.5 px-3 py-1 rounded cursor-pointer transition ${
-              activeTab === 'split' ? 'bg-cyan-600 text-white font-medium' : 'text-slate-400 hover:text-white'
+            onClick={() => setRightPanelTab('multimodel')}
+            className={`flex items-center gap-1 px-2.5 py-1 rounded cursor-pointer transition ${
+              rightPanelTab === 'multimodel' ? 'bg-indigo-600 text-white font-medium' : 'text-slate-400 hover:text-white'
             }`}
           >
-            <Layers className="w-3.5 h-3.5" /> Split Studio
+            <ArrowRightLeft className="w-3.5 h-3.5" /> Dual Telemetry
+          </button>
+          <button
+            onClick={() => setRightPanelTab('presets')}
+            className={`flex items-center gap-1 px-2.5 py-1 rounded cursor-pointer transition ${
+              rightPanelTab === 'presets' ? 'bg-indigo-600 text-white font-medium' : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            <Boxes className="w-3.5 h-3.5" /> Presets
+          </button>
+          <button
+            onClick={() => setRightPanelTab('telemetry')}
+            className={`flex items-center gap-1 px-2.5 py-1 rounded cursor-pointer transition ${
+              rightPanelTab === 'telemetry' ? 'bg-indigo-600 text-white font-medium' : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            <Activity className="w-3.5 h-3.5" /> WebXR/Bridge
           </button>
         </div>
 
@@ -268,7 +321,7 @@ export const App: React.FC = () => {
         {/* Right Side: Live Raymarching Viewport & Telemetry Telemetry Suite */}
         <div className="w-[520px] shrink-0 flex flex-col p-2 gap-2 bg-[#0c0e15] overflow-y-auto">
           {/* 3D Raymarching Quad Viewport */}
-          <div className="h-72 w-full shrink-0">
+          <div className="h-64 w-full shrink-0">
             <RaymarchingViewport
               glslCode={glslCode}
               creatureParams={creatureParams}
@@ -276,121 +329,158 @@ export const App: React.FC = () => {
               entropy={metrics.entropy}
               latencyMs={metrics.latencyMs}
               showMeshOverlay={showMeshOverlay}
+              cameraOrbit={cameraOrbit}
               onError={setShaderError}
             />
           </div>
 
-          {/* Ollama / Model Inference Node Bridge Panel */}
-          <div className="bg-[#141723] rounded-lg border border-slate-800 p-3 space-y-2.5 text-xs">
-            <div className="flex items-center justify-between border-b border-slate-800/80 pb-2">
-              <span className="font-semibold text-slate-200 flex items-center gap-1.5">
-                <Radio className="w-3.5 h-3.5 text-cyan-400" /> Ollama / llama.cpp Node Bridge
-              </span>
-              <span className="text-[10px] text-cyan-400 font-mono">
-                {metrics.tokensPerSecond} tok/s | {metrics.latencyMs}ms
-              </span>
-            </div>
-
-            <div className="flex gap-2">
-              <input
-                type="text"
-                value={prompt}
-                onChange={(e) => setPrompt(e.target.value)}
-                placeholder="Inference prompt..."
-                className="flex-1 bg-[#1a1f30] border border-slate-700 rounded px-2.5 py-1 text-slate-200 text-xs focus:outline-none focus:border-cyan-500"
+          {/* Right Modular Panel Switcher Body */}
+          <div className="flex-1 flex flex-col overflow-hidden">
+            {rightPanelTab === 'multimodel' && (
+              <MultiModelInspector
+                onOffsetsChange={(offsets, enabled) => {
+                  setDualOffsets(offsets);
+                  setApplyOffsetsEnabled(enabled);
+                }}
+                onModelSelect={(_slot, m) => {
+                  setMetrics(m);
+                }}
               />
-              <button
-                onClick={handleTriggerInference}
-                disabled={isInferring}
-                className="px-3 py-1 bg-cyan-600 hover:bg-cyan-500 disabled:opacity-50 text-white rounded font-medium flex items-center gap-1 cursor-pointer transition"
-              >
-                {isInferring ? <RefreshCw className="w-3 h-3 animate-spin" /> : <Play className="w-3 h-3" />}
-                Infer
-              </button>
-            </div>
+            )}
 
-            {/* Weights Distribution Bar Visualization */}
-            <div>
-              <div className="flex justify-between text-[10px] text-slate-400 mb-1">
-                <span>Latent Weights Distribution (SDF Morphogen)</span>
-                <span>Entropy: {metrics.entropy.toFixed(2)}</span>
-              </div>
-              <div className="grid grid-cols-8 gap-1 h-8 bg-slate-900/60 p-1 rounded border border-slate-800">
-                {metrics.weightsDistribution.map((w, idx) => (
-                  <div key={idx} className="flex flex-col justify-end h-full">
-                    <div
-                      style={{ height: `${Math.round(w * 100)}%` }}
-                      className="bg-cyan-500 rounded-xs transition-all duration-150"
+            {rightPanelTab === 'presets' && (
+              <PresetLibrarySidebar
+                currentGraph={shaderGraph}
+                onApplyPreset={handleApplyPreset}
+                onApplyGlsl={(glsl, parsed) => {
+                  setGlslCode(glsl);
+                  setShaderGraph(parsed);
+                }}
+              />
+            )}
+
+            {rightPanelTab === 'telemetry' && (
+              <div className="flex flex-col gap-2 overflow-y-auto">
+                {/* Ollama / Model Inference Node Bridge Panel */}
+                <div className="bg-[#141723] rounded-lg border border-slate-800 p-3 space-y-2.5 text-xs">
+                  <div className="flex items-center justify-between border-b border-slate-800/80 pb-2">
+                    <span className="font-semibold text-slate-200 flex items-center gap-1.5">
+                      <Radio className="w-3.5 h-3.5 text-cyan-400" /> Ollama / llama.cpp Node Bridge
+                    </span>
+                    <span className="text-[10px] text-cyan-400 font-mono">
+                      {metrics.tokensPerSecond} tok/s | {metrics.latencyMs}ms
+                    </span>
+                  </div>
+
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={prompt}
+                      onChange={(e) => setPrompt(e.target.value)}
+                      placeholder="Inference prompt..."
+                      className="flex-1 bg-[#1a1f30] border border-slate-700 rounded px-2.5 py-1 text-slate-200 text-xs focus:outline-none focus:border-cyan-500"
                     />
+                    <button
+                      onClick={handleTriggerInference}
+                      disabled={isInferring}
+                      className="px-3 py-1 bg-cyan-600 hover:bg-cyan-500 disabled:opacity-50 text-white rounded font-medium flex items-center gap-1 cursor-pointer transition"
+                    >
+                      {isInferring ? <RefreshCw className="w-3 h-3 animate-spin" /> : <Play className="w-3 h-3" />}
+                      Infer
+                    </button>
                   </div>
-                ))}
-              </div>
-            </div>
 
-            {/* SDF Parameter Indicators */}
-            <div className="grid grid-cols-3 gap-2 text-[11px] pt-1">
-              <div className="bg-slate-900/40 p-1.5 rounded border border-slate-800/80">
-                <span className="text-slate-400 block text-[10px]">Gyroid Freq</span>
-                <span className="text-cyan-300 font-mono">{creatureParams.gyroidFreq}</span>
-              </div>
-              <div className="bg-slate-900/40 p-1.5 rounded border border-slate-800/80">
-                <span className="text-slate-400 block text-[10px]">Tentacles</span>
-                <span className="text-purple-300 font-mono">{creatureParams.tentacleCount}</span>
-              </div>
-              <div className="bg-slate-900/40 p-1.5 rounded border border-slate-800/80">
-                <span className="text-slate-400 block text-[10px]">Smooth min (smin)</span>
-                <span className="text-amber-300 font-mono">{creatureParams.smoothBlend}</span>
-              </div>
-            </div>
-          </div>
-
-          {/* WebXR Telemetry & UE5 UDP Streamer Panel */}
-          <div className="bg-[#141723] rounded-lg border border-slate-800 p-3 space-y-2.5 text-xs flex-1">
-            <div className="flex items-center justify-between border-b border-slate-800/80 pb-2">
-              <span className="font-semibold text-slate-200 flex items-center gap-1.5">
-                <Activity className="w-3.5 h-3.5 text-emerald-400" /> WebXR Telemetry & UE5 UDP Stream
-              </span>
-              <span className="text-[10px] text-emerald-400 font-mono">
-                {xrTelemetry?.sessionState.toUpperCase() || 'SIMULATED'}
-              </span>
-            </div>
-
-            {xrTelemetry && (
-              <div className="space-y-2 text-[11px]">
-                {/* Head 6DoF Pose */}
-                <div className="bg-slate-900/50 p-2 rounded border border-slate-800/80 font-mono">
-                  <div className="text-slate-400 text-[10px] mb-1">Head Pose (Position & Euler)</div>
-                  <div className="flex justify-between text-slate-300">
-                    <span>Pos: [{xrTelemetry.head.position.x}, {xrTelemetry.head.position.y}, {xrTelemetry.head.position.z}]</span>
-                    <span className="text-cyan-400">Rot: [{xrTelemetry.head.rotation.x}, {xrTelemetry.head.rotation.y}]</span>
+                  {/* Weights Distribution Bar Visualization */}
+                  <div>
+                    <div className="flex justify-between text-[10px] text-slate-400 mb-1">
+                      <span>Latent Weights Distribution (SDF Morphogen)</span>
+                      <span>Entropy: {metrics.entropy.toFixed(2)}</span>
+                    </div>
+                    <div className="grid grid-cols-8 gap-1 h-8 bg-slate-900/60 p-1 rounded border border-slate-800">
+                      {metrics.weightsDistribution.map((w, idx) => (
+                        <div key={idx} className="flex flex-col justify-end h-full">
+                          <div
+                            style={{ height: `${Math.round(w * 100)}%` }}
+                            className="bg-cyan-500 rounded-xs transition-all duration-150"
+                          />
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                </div>
 
-                {/* Hand Controllers */}
-                <div className="grid grid-cols-2 gap-2 font-mono">
-                  <div className="bg-slate-900/50 p-2 rounded border border-slate-800/80">
-                    <span className="text-slate-400 text-[10px] block">Left Hand 6DoF</span>
-                    <span className="text-slate-300">Trigger: {Math.round(xrTelemetry.leftHand.trigger * 100)}%</span>
-                  </div>
-                  <div className="bg-slate-900/50 p-2 rounded border border-slate-800/80">
-                    <span className="text-slate-400 text-[10px] block">Right Hand 6DoF</span>
-                    <span className="text-slate-300">Trigger: {Math.round(xrTelemetry.rightHand.trigger * 100)}%</span>
+                  {/* SDF Parameter Indicators */}
+                  <div className="grid grid-cols-3 gap-2 text-[11px] pt-1">
+                    <div className="bg-slate-900/40 p-1.5 rounded border border-slate-800/80">
+                      <span className="text-slate-400 block text-[10px]">Gyroid Freq</span>
+                      <span className="text-cyan-300 font-mono">{creatureParams.gyroidFreq}</span>
+                    </div>
+                    <div className="bg-slate-900/40 p-1.5 rounded border border-slate-800/80">
+                      <span className="text-slate-400 block text-[10px]">Tentacles</span>
+                      <span className="text-purple-300 font-mono">{creatureParams.tentacleCount}</span>
+                    </div>
+                    <div className="bg-slate-900/40 p-1.5 rounded border border-slate-800/80">
+                      <span className="text-slate-400 block text-[10px]">Smooth min (smin)</span>
+                      <span className="text-amber-300 font-mono">{creatureParams.smoothBlend}</span>
+                    </div>
                   </div>
                 </div>
 
-                {/* Unreal Engine 5 Live Stream Status */}
-                <div className="flex items-center justify-between bg-slate-950/70 p-2 rounded border border-slate-800/80">
-                  <div className="flex items-center gap-1.5 text-slate-300">
-                    <Share2 className="w-3 h-3 text-cyan-400" />
-                    <span>UE5 OSC UDP Packet Feed:</span>
+                {/* WebXR Telemetry & UE5 UDP Streamer Panel */}
+                <div className="bg-[#141723] rounded-lg border border-slate-800 p-3 space-y-2.5 text-xs">
+                  <div className="flex items-center justify-between border-b border-slate-800/80 pb-2">
+                    <span className="font-semibold text-slate-200 flex items-center gap-1.5">
+                      <Activity className="w-3.5 h-3.5 text-emerald-400" /> WebXR Telemetry & UE5 UDP Stream
+                    </span>
+                    <span className="text-[10px] text-emerald-400 font-mono">
+                      {xrTelemetry?.sessionState.toUpperCase() || 'SIMULATED'}
+                    </span>
                   </div>
-                  <span className="text-cyan-300 font-mono text-[10px]">{udpStats.packetsSent} pkts &rarr; {udpStats.target}</span>
+
+                  {xrTelemetry && (
+                    <div className="space-y-2 text-[11px]">
+                      {/* Head 6DoF Pose */}
+                      <div className="bg-slate-900/50 p-2 rounded border border-slate-800/80 font-mono">
+                        <div className="text-slate-400 text-[10px] mb-1">Head Pose (Position & Euler)</div>
+                        <div className="flex justify-between text-slate-300">
+                          <span>Pos: [{xrTelemetry.head.position.x}, {xrTelemetry.head.position.y}, {xrTelemetry.head.position.z}]</span>
+                          <span className="text-cyan-400">Rot: [{xrTelemetry.head.rotation.x}, {xrTelemetry.head.rotation.y}]</span>
+                        </div>
+                      </div>
+
+                      {/* Hand Controllers */}
+                      <div className="grid grid-cols-2 gap-2 font-mono">
+                        <div className="bg-slate-900/50 p-2 rounded border border-slate-800/80">
+                          <span className="text-slate-400 text-[10px] block">Left Hand 6DoF</span>
+                          <span className="text-slate-300">Trigger: {Math.round(xrTelemetry.leftHand.trigger * 100)}%</span>
+                        </div>
+                        <div className="bg-slate-900/50 p-2 rounded border border-slate-800/80">
+                          <span className="text-slate-400 text-[10px] block">Right Hand 6DoF</span>
+                          <span className="text-slate-300">Trigger: {Math.round(xrTelemetry.rightHand.trigger * 100)}%</span>
+                        </div>
+                      </div>
+
+                      {/* Unreal Engine 5 Live Stream Status */}
+                      <div className="flex items-center justify-between bg-slate-950/70 p-2 rounded border border-slate-800/80">
+                        <div className="flex items-center gap-1.5 text-slate-300">
+                          <Share2 className="w-3 h-3 text-cyan-400" />
+                          <span>UE5 OSC UDP Packet Feed:</span>
+                        </div>
+                        <span className="text-cyan-300 font-mono text-[10px]">{udpStats.packetsSent} pkts &rarr; {udpStats.target}</span>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             )}
           </div>
         </div>
       </div>
+
+      {/* Bottom: 10-Second Cinematic Keyframe Timeline */}
+      <KeyframeTimeline
+        creatureParams={creatureParams}
+        onCameraUpdate={(orbit) => setCameraOrbit(orbit)}
+      />
     </div>
   );
 };
