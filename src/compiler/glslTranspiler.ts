@@ -5,7 +5,10 @@ export function graphToGlsl(graph: ShaderGraph): string {
   const gyroidNode = graph.nodes.find((n) => n.type === 'sdGyroid');
   const torusNode = graph.nodes.find((n) => n.type === 'sdTorus');
   const boxNode = graph.nodes.find((n) => n.type === 'sdBox');
+  const cylinderNode = graph.nodes.find((n) => n.type === 'sdCylinder');
   const sminNode = graph.nodes.find((n) => n.type === 'smin');
+  const intersectNode = graph.nodes.find((n) => n.type === 'opIntersect');
+  const repeatNode = graph.nodes.find((n) => n.type === 'opRepeat');
   const creatureNode = graph.nodes.find((n) => n.type === 'creatureBridge');
   const lightNode = graph.nodes.find((n) => n.type === 'lightBlinnPhong');
 
@@ -51,6 +54,11 @@ float sdTorus(vec3 p, vec2 t) {
     return length(q) - t.y;
 }
 
+float sdCylinder(vec3 p, vec2 h) {
+    vec2 d = abs(vec2(length(p.xz), p.y)) - h;
+    return min(max(d.x, d.y), 0.0) + length(max(d, 0.0));
+}
+
 float sdGyroid(vec3 p, float scale, float thickness, float bias) {
     vec3 v = p * scale;
     return (abs(dot(sin(v), cos(v.zxy)) + bias) - thickness) / scale;
@@ -60,6 +68,14 @@ float sdGyroid(vec3 p, float scale, float thickness, float bias) {
 float smin(float a, float b, float k) {
     float h = clamp(0.5 + 0.5 * (b - a) / k, 0.0, 1.0);
     return mix(b, a, h) - k * h * (1.0 - h);
+}
+
+float opIntersect(float d1, float d2) {
+    return max(d1, d2);
+}
+
+vec3 opRepeat(vec3 p, vec3 c) {
+    return mod(p + 0.5 * c, c) - 0.5 * c;
 }
 
 vec3 opTwist(vec3 p, float k) {
@@ -78,6 +94,12 @@ vec3 cosinePalette(float t, vec3 a, vec3 b, vec3 c, vec3 d) {
 float mapScene(vec3 p) {
     // Displace position based on territorial center and agent density
     vec3 localP = p - u_center;
+
+    ${repeatNode ? `
+    // Domain repetition grid
+    float repPeriod = ${parseFloat(repeatNode.inputs.period || 4.0).toFixed(2)};
+    localP = opRepeat(localP, vec3(repPeriod, 0.0, repPeriod));
+    ` : ''}
 
     // Dynamic creature topology pulsation modulated by latency/entropy
     float pulse = sin(u_time * 2.0) * (0.05 + u_entropy * 0.1);
@@ -109,6 +131,16 @@ float mapScene(vec3 p) {
     ${torusNode ? `
     float dTorus = sdTorus(localP, vec2(${torusNode.inputs.majorRadius || 1.4}, ${torusNode.inputs.minorRadius || 0.15}));
     d = smin(d, dTorus, 0.2);
+    ` : ''}
+
+    ${cylinderNode ? `
+    float dCylinder = sdCylinder(localP, vec2(${cylinderNode.inputs.radius || 0.5}, ${cylinderNode.inputs.height || 1.0}));
+    d = min(d, dCylinder);
+    ` : ''}
+
+    ${intersectNode ? `
+    float dIntersect = sdSphere(localP, 1.8);
+    d = opIntersect(d, dIntersect);
     ` : ''}
 
     ${boxNode ? `
@@ -249,6 +281,43 @@ export function glslToGraph(glsl: string): ShaderGraph {
     y: 140,
     inputs: { blendK: sminBlend },
   });
+
+  if (glsl.includes('sdCylinder')) {
+    const cylMatch = glsl.match(/sdCylinder\(localP,\s*vec2\(([\d\.]+),\s*([\d\.]+)\)\)/);
+    nodes.push({
+      id: 'cylinder_1',
+      type: 'sdCylinder',
+      title: 'Cylinder SDF',
+      x: 80,
+      y: 520,
+      inputs: {
+        radius: cylMatch ? parseFloat(cylMatch[1]) : 0.5,
+        height: cylMatch ? parseFloat(cylMatch[2]) : 1.0,
+      },
+    });
+  }
+
+  if (glsl.includes('opRepeat')) {
+    nodes.push({
+      id: 'repeat_1',
+      type: 'opRepeat',
+      title: 'Domain Repeat',
+      x: 340,
+      y: 300,
+      inputs: { period: 4.0 },
+    });
+  }
+
+  if (glsl.includes('opIntersect')) {
+    nodes.push({
+      id: 'intersect_1',
+      type: 'opIntersect',
+      title: 'Smooth Intersection',
+      x: 340,
+      y: 440,
+      inputs: {},
+    });
+  }
 
   const hasCreature = glsl.includes('dTentacle') || glsl.includes('Ollama Creature');
   if (hasCreature) {

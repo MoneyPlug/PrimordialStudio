@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import type { ShaderGraph, GraphNode } from '../nodes/nodeTypes';
-import { Box, Layers, Sun, Sparkles, Cpu, Link, Trash2, Plus } from 'lucide-react';
+import { Box, Layers, Sun, Sparkles, Cpu, Link, Trash2, Plus, Grid, Disc } from 'lucide-react';
 
 interface VisualNodeGraphProps {
   graph: ShaderGraph;
@@ -63,7 +63,14 @@ export const VisualNodeGraph: React.FC<VisualNodeGraphProps> = ({ graph, onChang
       title,
       x: 200 + Math.random() * 80,
       y: 100 + Math.random() * 80,
-      inputs: type === 'sdTorus' ? { majorRadius: 1.2, minorRadius: 0.2 } : { size: 1.0 },
+      inputs:
+        type === 'sdTorus'
+          ? { majorRadius: 1.2, minorRadius: 0.2 }
+          : type === 'sdCylinder'
+          ? { radius: 0.5, height: 1.0 }
+          : type === 'opRepeat'
+          ? { period: 4.0 }
+          : { size: 1.0 },
     };
     onChange({
       ...graph,
@@ -86,8 +93,13 @@ export const VisualNodeGraph: React.FC<VisualNodeGraphProps> = ({ graph, onChang
       case 'sdTorus':
       case 'sdGyroid':
         return <Box className="w-4 h-4 text-cyan-400" />;
+      case 'sdCylinder':
+        return <Disc className="w-4 h-4 text-cyan-300" />;
+      case 'opRepeat':
+        return <Grid className="w-4 h-4 text-indigo-400" />;
       case 'smin':
       case 'opUnion':
+      case 'opIntersect':
         return <Layers className="w-4 h-4 text-purple-400" />;
       case 'lightBlinnPhong':
       case 'lightAO':
@@ -105,33 +117,45 @@ export const VisualNodeGraph: React.FC<VisualNodeGraphProps> = ({ graph, onChang
       onMouseMove={handleMouseMove}
       onMouseUp={handleMouseUp}
     >
-      <div className="flex items-center gap-2 p-2.5 bg-[#131622] border-b border-slate-800 text-xs">
-        <span className="font-semibold text-slate-300 mr-2 flex items-center gap-1.5">
+      <div className="flex items-center gap-1.5 p-2 bg-[#131622] border-b border-slate-800 text-xs flex-wrap">
+        <span className="font-semibold text-slate-300 mr-1 flex items-center gap-1.5">
           <Link className="w-3.5 h-3.5 text-cyan-400" /> Shader Node Graph
         </span>
         <button
           onClick={() => addNode('sdSphere', 'Sphere SDF')}
-          className="flex items-center gap-1 px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded border border-slate-700 cursor-pointer transition"
+          className="flex items-center gap-1 px-2 py-0.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded border border-slate-700 cursor-pointer transition text-[11px]"
         >
           <Plus className="w-3 h-3 text-cyan-400" /> Sphere
         </button>
         <button
           onClick={() => addNode('sdGyroid', 'Gyroid SDF')}
-          className="flex items-center gap-1 px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded border border-slate-700 cursor-pointer transition"
+          className="flex items-center gap-1 px-2 py-0.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded border border-slate-700 cursor-pointer transition text-[11px]"
         >
           <Plus className="w-3 h-3 text-cyan-400" /> Gyroid
         </button>
         <button
           onClick={() => addNode('sdTorus', 'Torus SDF')}
-          className="flex items-center gap-1 px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded border border-slate-700 cursor-pointer transition"
+          className="flex items-center gap-1 px-2 py-0.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded border border-slate-700 cursor-pointer transition text-[11px]"
         >
           <Plus className="w-3 h-3 text-cyan-400" /> Torus
         </button>
         <button
-          onClick={() => addNode('smin', 'Smooth Min')}
-          className="flex items-center gap-1 px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded border border-slate-700 cursor-pointer transition"
+          onClick={() => addNode('sdCylinder', 'Cylinder SDF')}
+          className="flex items-center gap-1 px-2 py-0.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded border border-slate-700 cursor-pointer transition text-[11px]"
         >
-          <Plus className="w-3 h-3 text-purple-400" /> Smooth Min
+          <Plus className="w-3 h-3 text-cyan-300" /> Cylinder
+        </button>
+        <button
+          onClick={() => addNode('opRepeat', 'Domain Repeat')}
+          className="flex items-center gap-1 px-2 py-0.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded border border-slate-700 cursor-pointer transition text-[11px]"
+        >
+          <Plus className="w-3 h-3 text-indigo-400" /> Repeat
+        </button>
+        <button
+          onClick={() => addNode('smin', 'Smooth Min')}
+          className="flex items-center gap-1 px-2 py-0.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded border border-slate-700 cursor-pointer transition text-[11px]"
+        >
+          <Plus className="w-3 h-3 text-purple-400" /> smin
         </button>
       </div>
 
@@ -211,6 +235,59 @@ export const VisualNodeGraph: React.FC<VisualNodeGraphProps> = ({ graph, onChang
                   </div>
                 )}
 
+                {node.type === 'sdCylinder' && (
+                  <>
+                    <div>
+                      <div className="flex justify-between text-[11px] text-slate-400 mb-1">
+                        <span>Radius</span>
+                        <span className="text-cyan-300">{node.inputs.radius ?? 0.5}</span>
+                      </div>
+                      <input
+                        type="range"
+                        min="0.1"
+                        max="2.0"
+                        step="0.05"
+                        value={node.inputs.radius ?? 0.5}
+                        onChange={(e) => updateNodeInput(node.id, 'radius', parseFloat(e.target.value))}
+                        className="w-full accent-cyan-300 h-1 bg-slate-700 rounded"
+                      />
+                    </div>
+                    <div>
+                      <div className="flex justify-between text-[11px] text-slate-400 mb-1">
+                        <span>Height</span>
+                        <span className="text-cyan-300">{node.inputs.height ?? 1.0}</span>
+                      </div>
+                      <input
+                        type="range"
+                        min="0.2"
+                        max="4.0"
+                        step="0.1"
+                        value={node.inputs.height ?? 1.0}
+                        onChange={(e) => updateNodeInput(node.id, 'height', parseFloat(e.target.value))}
+                        className="w-full accent-cyan-300 h-1 bg-slate-700 rounded"
+                      />
+                    </div>
+                  </>
+                )}
+
+                {node.type === 'opRepeat' && (
+                  <div>
+                    <div className="flex justify-between text-[11px] text-slate-400 mb-1">
+                      <span>Period</span>
+                      <span className="text-indigo-400">{node.inputs.period ?? 4.0}</span>
+                    </div>
+                    <input
+                      type="range"
+                      min="1.0"
+                      max="10.0"
+                      step="0.5"
+                      value={node.inputs.period ?? 4.0}
+                      onChange={(e) => updateNodeInput(node.id, 'period', parseFloat(e.target.value))}
+                      className="w-full accent-indigo-400 h-1 bg-slate-700 rounded"
+                    />
+                  </div>
+                )}
+
                 {node.type === 'sdGyroid' && (
                   <>
                     <div>
@@ -265,23 +342,21 @@ export const VisualNodeGraph: React.FC<VisualNodeGraphProps> = ({ graph, onChang
                 )}
 
                 {node.type === 'lightBlinnPhong' && (
-                  <>
-                    <div>
-                      <div className="flex justify-between text-[11px] text-slate-400 mb-1">
-                        <span>Specular Power</span>
-                        <span className="text-amber-400">{node.inputs.specularPower ?? 32}</span>
-                      </div>
-                      <input
-                        type="range"
-                        min="4"
-                        max="128"
-                        step="4"
-                        value={node.inputs.specularPower ?? 32}
-                        onChange={(e) => updateNodeInput(node.id, 'specularPower', parseFloat(e.target.value))}
-                        className="w-full accent-amber-400 h-1 bg-slate-700 rounded"
-                      />
+                  <div>
+                    <div className="flex justify-between text-[11px] text-slate-400 mb-1">
+                      <span>Specular Power</span>
+                      <span className="text-amber-400">{node.inputs.specularPower ?? 32}</span>
                     </div>
-                  </>
+                    <input
+                      type="range"
+                      min="4"
+                      max="128"
+                      step="4"
+                      value={node.inputs.specularPower ?? 32}
+                      onChange={(e) => updateNodeInput(node.id, 'specularPower', parseFloat(e.target.value))}
+                      className="w-full accent-amber-400 h-1 bg-slate-700 rounded"
+                    />
+                  </div>
                 )}
 
                 {node.type === 'creatureBridge' && (
