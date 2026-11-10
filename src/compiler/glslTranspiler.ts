@@ -39,6 +39,11 @@ uniform float u_density;
 uniform float u_stress;
 uniform vec3 u_center;
 
+// Mobile Actor Entities Telemetry Uniforms
+uniform vec4 u_predatorCoords[4]; // [x, y, z, state]
+uniform int u_predatorCount;
+uniform float u_crisisActive; // 0.0: stable, 1.0: crisis
+
 // Primitive Distance Functions
 float sdSphere(vec3 p, float s) {
     return length(p) - s;
@@ -88,6 +93,40 @@ vec3 opTwist(vec3 p, float k) {
 // Procedural Cosine Palette (Inigo Quilez color mapping)
 vec3 cosinePalette(float t, vec3 a, vec3 b, vec3 c, vec3 d) {
     return a + b * cos(6.28318 * (c * t + d));
+}
+
+// Mobile Creature SDF evaluated at dynamic position
+float sdCreatureActor(vec3 p, vec3 center, float state, float radius, float time) {
+    vec3 localP = p - center;
+    float pulse = sin(time * 3.0 + center.x) * (0.05 + u_entropy * 0.15);
+    float body = sdSphere(localP, radius + pulse);
+    float gyroid = sdGyroid(localP, 4.0 + u_entropy * 4.0, 0.04, 0.0) * 0.25;
+    float d = smin(body, gyroid, 0.2);
+
+    // Tentacle limbs
+    float count = 4.0 + u_stress * 4.0 + (state >= 2.0 ? 3.0 : 0.0);
+    float angle = atan(localP.z, localP.x);
+    float sector = 6.2831853 / max(3.0, count);
+    float a = mod(angle + sector * 0.5, sector) - sector * 0.5;
+    float r = length(localP.xz);
+    vec3 q = vec3(cos(a) * r, localP.y, sin(a) * r) - vec3(radius * 0.75, -0.1, 0.0);
+    float limb = length(max(abs(vec2(length(q.xz), q.y)) - vec2(0.06, 0.6 + u_entropy * 0.5), 0.0));
+    d = smin(d, limb, 0.2);
+    return d;
+}
+
+// Territorial Safe Zone Raymarching Barrier SDF (domain repetitions + smooth intersections)
+float sdDefensiveBarrier(vec3 p) {
+    vec3 bP1 = p - vec3(-3.0, 0.0, -1.0);
+    vec3 bRep = opRepeat(bP1, vec3(1.5, 0.0, 1.5));
+    float dRepBox = sdBox(bRep, vec3(0.25, 1.2, 0.25));
+
+    vec3 bP2 = p - vec3(3.0, 0.0, 1.0);
+    float dSphereBarrier = sdSphere(bP2, 1.4);
+    float dBoxBarrier = sdBox(bP2, vec3(1.1, 1.1, 1.1));
+    float dIntersectBarrier = opIntersect(dSphereBarrier, dBoxBarrier);
+
+    return min(dRepBox, dIntersectBarrier);
 }
 
 // Main Scene Distance Field deformed by model weights & civilization telemetry
@@ -148,6 +187,20 @@ float mapScene(vec3 p) {
     d = min(d, dBox);
     ` : ''}
 
+    // Defensive structures (territorial safe zones)
+    float dBarrier = sdDefensiveBarrier(p);
+    d = min(d, dBarrier);
+
+    // Dynamic Mobile Actor Entities (Predator SDFs streaming from simulation bus)
+    for (int i = 0; i < 4; i++) {
+        if (i >= u_predatorCount) break;
+        vec3 pPos = u_predatorCoords[i].xyz;
+        float pState = u_predatorCoords[i].w;
+        float radius = 0.55 + u_entropy * 0.4 + (u_crisisActive * 0.3);
+        float dPred = sdCreatureActor(p, pPos, pState, radius, u_time);
+        d = smin(d, dPred, 0.3);
+    }
+
     return d;
 }
 
@@ -180,11 +233,11 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     vec2 uv = (fragCoord.xy - 0.5 * u_resolution.xy) / u_resolution.y;
 
     // Camera setup
-    float camDist = 3.8;
+    float camDist = 4.2;
     float rotY = u_mouse.x * 3.14159 * 2.0 + u_time * 0.15;
     float rotX = (u_mouse.y - 0.5) * 1.5;
 
-    vec3 ro = vec3(camDist * sin(rotY), 1.2 + rotX * 2.0, camDist * cos(rotY));
+    vec3 ro = vec3(camDist * sin(rotY), 1.6 + rotX * 2.0, camDist * cos(rotY));
     vec3 ta = vec3(0.0, 0.0, 0.0);
     vec3 ww = normalize(ta - ro);
     vec3 uu = normalize(cross(ww, vec3(0.0, 1.0, 0.0)));
@@ -193,7 +246,7 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
 
     // Raymarch
     float t = 0.0;
-    float tmax = 25.0;
+    float tmax = 28.0;
     float d = 0.0;
     for (int i = 0; i < 96; i++) {
         vec3 p = ro + rd * t;
@@ -202,7 +255,7 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
         t += d * 0.85;
     }
 
-    vec3 col = vec3(0.04, 0.05, 0.09); // Dark background
+    vec3 col = vec3(0.03, 0.04, 0.07); // Dark background
 
     if (t < tmax) {
         vec3 p = ro + rd * t;
@@ -217,6 +270,9 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
         float ao = calcAO(p, n);
         float fresnel = pow(1.0 - max(dot(n, viewDir), 0.0), 3.0);
 
+        // High-Alert Crimson glow shift during Apex Crisis or high stress
+        vec3 alertGlow = mix(u_glowColor, vec3(1.0, 0.08, 0.05), clamp(u_crisisActive + u_stress * 0.7, 0.0, 1.0));
+
         // Inigo Quilez procedural cosine color palette mapping modulated by stress and entropy
         vec3 palA = vec3(0.5, 0.5, 0.5);
         vec3 palB = vec3(0.5, 0.5, 0.5);
@@ -226,11 +282,14 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
 
         vec3 diffuseColor = vec3(${diffuse[0].toFixed(2)}, ${diffuse[1].toFixed(2)}, ${diffuse[2].toFixed(2)});
         diffuseColor = mix(diffuseColor, paletteColor, 0.6);
-        diffuseColor = mix(diffuseColor, u_glowColor, 0.35);
+        diffuseColor = mix(diffuseColor, alertGlow, 0.45);
+
+        // Max bioluminescence flare during crisis
+        float biolumBoost = 1.0 + u_crisisActive * 1.5;
 
         col = diffuseColor * (${ambient.toFixed(2)} + diff * 0.85) * ao;
         col += vec3(1.0) * spec * 0.6;
-        col += u_glowColor * fresnel * 0.8;
+        col += alertGlow * fresnel * (0.8 * biolumBoost);
     }
 
     // Gamma correction
@@ -358,7 +417,7 @@ export function glslToGraph(glsl: string): ShaderGraph {
     title: 'Raymarching Master Output',
     x: 840,
     y: 180,
-    inputs: { maxSteps: 96, maxDist: 25.0 },
+    inputs: { maxSteps: 96, maxDist: 28.0 },
   });
 
   connections.push(
