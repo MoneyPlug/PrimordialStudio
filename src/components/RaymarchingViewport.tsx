@@ -12,6 +12,8 @@ interface RaymarchingViewportProps {
   entropy: number;
   latencyMs: number;
   showMeshOverlay?: boolean;
+  timelineOverrideTime?: number | null;
+  camOrbitOverride?: { rotY: number; rotX: number; dist: number } | null;
   onError?: (err: string | null) => void;
 }
 
@@ -22,6 +24,8 @@ export const RaymarchingViewport: React.FC<RaymarchingViewportProps> = ({
   entropy,
   latencyMs,
   showMeshOverlay = true,
+  timelineOverrideTime = null,
+  camOrbitOverride = null,
   onError,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -33,7 +37,12 @@ export const RaymarchingViewport: React.FC<RaymarchingViewportProps> = ({
   const creatureMeshRef = useRef<THREE.Mesh | null>(null);
   const binderRef = useRef<StudioTelemetryBinder | null>(null);
   const mouseRef = useRef({ x: 0.5, y: 0.5 });
+  const timelineOverrideRef = useRef<number | null>(timelineOverrideTime);
+  const camOrbitOverrideRef = useRef<{ rotY: number; rotX: number; dist: number } | null>(camOrbitOverride);
   const [fps, setFps] = useState(60);
+
+  timelineOverrideRef.current = timelineOverrideTime;
+  camOrbitOverrideRef.current = camOrbitOverride;
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -123,8 +132,23 @@ export const RaymarchingViewport: React.FC<RaymarchingViewportProps> = ({
       animationId = requestAnimationFrame(animate);
 
       if (materialRef.current) {
-        materialRef.current.uniforms.u_time.value = time * 0.001;
-        materialRef.current.uniforms.u_mouse.value.set(mouseRef.current.x, mouseRef.current.y);
+        // If keyframe timeline is driving time, use timeline time, else live performance time
+        const effectiveTime =
+          timelineOverrideRef.current !== null
+            ? timelineOverrideRef.current
+            : time * 0.001;
+
+        materialRef.current.uniforms.u_time.value = effectiveTime;
+
+        if (camOrbitOverrideRef.current) {
+          const orbit = camOrbitOverrideRef.current;
+          materialRef.current.uniforms.u_mouse.value.set(
+            orbit.rotY / (Math.PI * 2),
+            orbit.rotX / 1.5 + 0.5
+          );
+        } else {
+          materialRef.current.uniforms.u_mouse.value.set(mouseRef.current.x, mouseRef.current.y);
+        }
       }
 
       if (creatureMeshRef.current) {
