@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import type { CreatureSDFParams } from '../sdf/creatureSdf';
 import { generateCreatureGeometry } from '../sdf/marchingCubes';
 import type { Vector3D } from '../xr/webxrTelemetry';
+import { StudioTelemetryBinder } from '../services/studioTelemetryBinder';
 
 interface RaymarchingViewportProps {
   glslCode: string;
@@ -30,6 +31,7 @@ export const RaymarchingViewport: React.FC<RaymarchingViewportProps> = ({
   const meshRef = useRef<THREE.Mesh | null>(null);
   const materialRef = useRef<THREE.ShaderMaterial | null>(null);
   const creatureMeshRef = useRef<THREE.Mesh | null>(null);
+  const binderRef = useRef<StudioTelemetryBinder | null>(null);
   const mouseRef = useRef({ x: 0.5, y: 0.5 });
   const [fps, setFps] = useState(60);
 
@@ -62,6 +64,10 @@ export const RaymarchingViewport: React.FC<RaymarchingViewportProps> = ({
       u_latency: { value: latencyMs / 1000 },
       u_glowColor: { value: new THREE.Vector3(...creatureParams.glowColor) },
       u_creatureBlend: { value: creatureParams.smoothBlend },
+      // Simulation / Atlas Earth telemetry uniforms
+      u_density: { value: 1.0 },
+      u_stress: { value: 0.0 },
+      u_center: { value: new THREE.Vector3(0.0, 0.0, 0.0) },
     };
 
     const vertexShader = `
@@ -92,6 +98,9 @@ export const RaymarchingViewport: React.FC<RaymarchingViewportProps> = ({
     const mesh = new THREE.Mesh(quadGeom, material);
     meshRef.current = mesh;
     scene.add(mesh);
+
+    // Initialize Studio Telemetry WebSocket Binder
+    binderRef.current = new StudioTelemetryBinder(material);
 
     const creatureGeom = generateCreatureGeometry(creatureParams, 18);
     const creatureMat = new THREE.MeshStandardMaterial({
@@ -149,6 +158,7 @@ export const RaymarchingViewport: React.FC<RaymarchingViewportProps> = ({
     return () => {
       cancelAnimationFrame(animationId);
       window.removeEventListener('resize', handleResize);
+      binderRef.current?.dispose();
       renderer.dispose();
       quadGeom.dispose();
     };

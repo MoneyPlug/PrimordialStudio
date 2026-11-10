@@ -31,6 +31,11 @@ uniform float u_latency;
 uniform float u_creatureBlend;
 uniform vec3 u_glowColor;
 
+// Live Civilization & Simulation Telemetry Uniforms
+uniform float u_density;
+uniform float u_stress;
+uniform vec3 u_center;
+
 // Primitive Distance Functions
 float sdSphere(vec3 p, float s) {
     return length(p) - s;
@@ -64,67 +69,78 @@ vec3 opTwist(vec3 p, float k) {
     return vec3(m * p.xz, p.y).xzy;
 }
 
-// Main Scene Distance Field
+// Procedural Cosine Palette (Inigo Quilez color mapping)
+vec3 cosinePalette(float t, vec3 a, vec3 b, vec3 c, vec3 d) {
+    return a + b * cos(6.28318 * (c * t + d));
+}
+
+// Main Scene Distance Field deformed by model weights & civilization telemetry
 float mapScene(vec3 p) {
-    // Dynamic creature topology pulsation
+    // Displace position based on territorial center and agent density
+    vec3 localP = p - u_center;
+
+    // Dynamic creature topology pulsation modulated by latency/entropy
     float pulse = sin(u_time * 2.0) * (0.05 + u_entropy * 0.1);
 
-    // Sphere primitive
-    float dSphere = sdSphere(p, ${sphereRadius.toFixed(3)} + pulse);
+    // Wave modulation driven by societal stress and population density
+    float socialWave = sin(localP.x * (u_density + 0.1) + u_time) * cos(localP.z * (u_density + 0.1) + u_time);
+
+    // Base sphere geometry warped by simulation stress factor and model weights
+    float baseDist = length(localP) - (${sphereRadius.toFixed(3)} + pulse + (u_stress * 0.5));
+    float dSphere = baseDist + (socialWave * 0.15 * max(0.2, u_density));
 
     // Gyroid internal topology
-    float dGyroid = sdGyroid(p, ${gyroidScale.toFixed(2)}, ${gyroidThick.toFixed(3)}, 0.0);
+    float dGyroid = sdGyroid(localP, ${gyroidScale.toFixed(2)}, ${gyroidThick.toFixed(3)}, 0.0);
 
     // Smooth Min combination
     float d = smin(dSphere, dGyroid * 0.35, ${sminBlend.toFixed(3)});
 
     ${creatureNode ? `
     // Connected Ollama Creature Bridge Morphological Limbs
-    float angle = atan(p.z, p.x);
+    float angle = atan(localP.z, localP.x);
     float sector = 6.2831853 / 6.0;
     float a = mod(angle + sector * 0.5, sector) - sector * 0.5;
-    float r = length(p.xz);
-    vec3 q = vec3(cos(a) * r, p.y, sin(a) * r) - vec3(0.9, -0.1, 0.0);
+    float r = length(localP.xz);
+    vec3 q = vec3(cos(a) * r, localP.y, sin(a) * r) - vec3(0.9, -0.1, 0.0);
     float dTentacle = length(max(abs(vec2(length(q.xz), q.y)) - vec2(0.08, 0.8), 0.0));
     d = smin(d, dTentacle, 0.25);
     ` : ''}
 
     ${torusNode ? `
-    float dTorus = sdTorus(p, vec2(${torusNode.inputs.majorRadius || 1.4}, ${torusNode.inputs.minorRadius || 0.15}));
+    float dTorus = sdTorus(localP, vec2(${torusNode.inputs.majorRadius || 1.4}, ${torusNode.inputs.minorRadius || 0.15}));
     d = smin(d, dTorus, 0.2);
     ` : ''}
 
     ${boxNode ? `
-    float dBox = sdBox(p - vec3(0.0, -1.2, 0.0), vec3(1.5, 0.1, 1.5));
+    float dBox = sdBox(localP - vec3(0.0, -1.2, 0.0), vec3(1.5, 0.1, 1.5));
     d = min(d, dBox);
     ` : ''}
 
     return d;
 }
 
-// Surface Normal via Tetrahedron Technique
+// Analytical Normal Calculation via Central Differences (tight epsilon = 0.001)
 vec3 calcNormal(vec3 p) {
     const float eps = 0.001;
-    const vec2 h = vec2(eps, -eps);
-    return normalize(
-        h.xyy * mapScene(p + h.xyy) +
-        h.yyx * mapScene(p + h.yyx) +
-        h.yxy * mapScene(p + h.yxy) +
-        h.xxx * mapScene(p + h.xxx)
-    );
+    vec2 e = vec2(eps, 0.0);
+    return normalize(vec3(
+        mapScene(p + e.xyy) - mapScene(p - e.xyy),
+        mapScene(p + e.yxy) - mapScene(p - e.yxy),
+        mapScene(p + e.yyx) - mapScene(p - e.yyx)
+    ));
 }
 
-// Ambient Occlusion
+// Screen-Space / Raymarched Ambient Occlusion (SSAO)
 float calcAO(vec3 pos, vec3 nor) {
     float occ = 0.0;
     float sca = 1.0;
-    for (int i = 0; i < 4; i++) {
-        float h = 0.01 + 0.12 * float(i) / 3.0;
+    for (int i = 0; i < 5; i++) {
+        float h = 0.01 + 0.15 * float(i) / 4.0;
         float d = mapScene(pos + h * nor);
         occ += (h - d) * sca;
-        sca *= 0.85;
+        sca *= 0.82;
     }
-    return clamp(1.0 - 2.5 * occ, 0.0, 1.0);
+    return clamp(1.0 - 2.8 * occ, 0.0, 1.0);
 }
 
 // Raymarching Loop
@@ -154,7 +170,7 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
         t += d * 0.85;
     }
 
-    vec3 col = vec3(0.04, 0.05, 0.09); // Background
+    vec3 col = vec3(0.04, 0.05, 0.09); // Dark background
 
     if (t < tmax) {
         vec3 p = ro + rd * t;
@@ -169,8 +185,16 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
         float ao = calcAO(p, n);
         float fresnel = pow(1.0 - max(dot(n, viewDir), 0.0), 3.0);
 
+        // Inigo Quilez procedural cosine color palette mapping modulated by stress and entropy
+        vec3 palA = vec3(0.5, 0.5, 0.5);
+        vec3 palB = vec3(0.5, 0.5, 0.5);
+        vec3 palC = vec3(1.0, 1.0, 1.0);
+        vec3 palD = vec3(0.0, 0.33, 0.67) + vec3((u_entropy + u_stress * 0.5) * 0.2);
+        vec3 paletteColor = cosinePalette(p.y * 0.4 + u_time * 0.1, palA, palB, palC, palD);
+
         vec3 diffuseColor = vec3(${diffuse[0].toFixed(2)}, ${diffuse[1].toFixed(2)}, ${diffuse[2].toFixed(2)});
-        diffuseColor = mix(diffuseColor, u_glowColor, 0.45);
+        diffuseColor = mix(diffuseColor, paletteColor, 0.6);
+        diffuseColor = mix(diffuseColor, u_glowColor, 0.35);
 
         col = diffuseColor * (${ambient.toFixed(2)} + diff * 0.85) * ao;
         col += vec3(1.0) * spec * 0.6;
@@ -192,7 +216,7 @@ export function glslToGraph(glsl: string): ShaderGraph {
   const nodes: GraphNode[] = [];
   const connections: GraphConnection[] = [];
 
-  const sphereMatch = glsl.match(/sdSphere\(\s*p\s*,\s*([\d\.]+)/);
+  const sphereMatch = glsl.match(/sdSphere\(\s*p\s*,\s*([\d\.]+)/) || glsl.match(/\(\s*([\d\.]+)\s*\+\s*pulse/);
   const sphereRadius = sphereMatch ? parseFloat(sphereMatch[1]) : 1.0;
   nodes.push({
     id: 'sphere_1',
@@ -203,7 +227,7 @@ export function glslToGraph(glsl: string): ShaderGraph {
     inputs: { radius: sphereRadius },
   });
 
-  const gyroidMatch = glsl.match(/sdGyroid\(\s*p\s*,\s*([\d\.]+)\s*,\s*([\d\.]+)/);
+  const gyroidMatch = glsl.match(/sdGyroid\(\s*[^,]+,\s*([\d\.]+)\s*,\s*([\d\.]+)/);
   const gyroidScale = gyroidMatch ? parseFloat(gyroidMatch[1]) : 5.0;
   const gyroidThick = gyroidMatch ? parseFloat(gyroidMatch[2]) : 0.05;
   nodes.push({
