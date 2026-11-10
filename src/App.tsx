@@ -8,8 +8,11 @@ import { graphToGlsl, glslToGraph } from './compiler/glslTranspiler';
 import { VisualNodeGraph } from './components/VisualNodeGraph';
 import { MonacoGlslEditor } from './components/MonacoGlslEditor';
 import { RaymarchingViewport } from './components/RaymarchingViewport';
+import { MultiModelInspector } from './components/MultiModelInspector';
+import { KeyframeTimeline } from './components/KeyframeTimeline';
+import { PresetLibrarySidebar } from './components/PresetLibrarySidebar';
+import type { ShaderPresetTemplate } from './presets/shaderPresets';
 import {
-  Sparkles,
   Radio,
   Headphones,
   Sliders,
@@ -20,12 +23,23 @@ import {
   Eye,
   Activity,
   Layers,
+  ArrowRightLeft,
+  Bookmark,
 } from 'lucide-react';
 
 export const App: React.FC = () => {
   // Navigation / Layout state
   const [activeTab, setActiveTab] = useState<'graph' | 'monaco' | 'split'>('split');
   const [showMeshOverlay, setShowMeshOverlay] = useState(false);
+
+  // New Feature Panels State
+  const [isInspectorOpen, setIsInspectorOpen] = useState(false);
+  const [isPresetSidebarOpen, setIsPresetSidebarOpen] = useState(false);
+  const [activePresetId, setActivePresetId] = useState<string | undefined>('bioluminescent-deep-sea');
+
+  // Timeline playback state overrides
+  const [timelineOverrideTime, setTimelineOverrideTime] = useState<number | null>(null);
+  const [camOrbitOverride, setCamOrbitOverride] = useState<{ rotY: number; rotX: number; dist: number } | null>(null);
 
   // Model & Creature Telemetry State
   const [prompt, setPrompt] = useState('Bioluminescent abyssal creature with fractal gyroid skeletal morphology');
@@ -152,14 +166,64 @@ export const App: React.FC = () => {
     }
   };
 
+  // Handle Preset selection from Template Library
+  const handleSelectPreset = (preset: ShaderPresetTemplate) => {
+    setActivePresetId(preset.id);
+    setShaderGraph(preset.graph);
+    const newGlsl = graphToGlsl(preset.graph);
+    setGlslCode(newGlsl);
+    setCreatureParams(preset.creatureParams);
+    setPrompt(preset.prompt);
+  };
+
+  // Handle Timeline Scrubbing & Keyframe Playback State
+  const handleApplyTimelineState = (state: {
+    uTime: number;
+    camOrbit?: { rotY: number; rotX: number; dist: number };
+    creatureParams?: CreatureSDFParams;
+    entropy?: number;
+    latencyMs?: number;
+  }) => {
+    setTimelineOverrideTime(state.uTime);
+    if (state.camOrbit) setCamOrbitOverride(state.camOrbit);
+    if (state.creatureParams) setCreatureParams(state.creatureParams);
+    if (state.entropy !== undefined && state.latencyMs !== undefined) {
+      setMetrics((prev) => ({
+        ...prev,
+        entropy: state.entropy ?? prev.entropy,
+        latencyMs: Math.round(state.latencyMs ?? prev.latencyMs),
+      }));
+    }
+  };
+
   return (
     <div className="flex flex-col w-full h-screen bg-[#090b10] text-slate-100 font-sans select-none overflow-hidden">
+      {/* Preset Library Sidebar Drawer */}
+      <PresetLibrarySidebar
+        isOpen={isPresetSidebarOpen}
+        onClose={() => setIsPresetSidebarOpen(false)}
+        onSelectPreset={handleSelectPreset}
+        activePresetId={activePresetId}
+      />
+
+      {/* Multi-Model Latency & Weight Inspector Modal Overlay */}
+      <MultiModelInspector
+        isOpen={isInspectorOpen}
+        onClose={() => setIsInspectorOpen(false)}
+        primaryMetrics={metrics}
+        onApplyModelMetrics={(m) => setMetrics(m)}
+      />
+
       {/* Top Application Header */}
       <header className="h-14 border-b border-slate-800 bg-[#0e121a] px-4 flex items-center justify-between z-10 shrink-0">
         <div className="flex items-center gap-3">
-          <div className="p-1.5 rounded-lg bg-gradient-to-tr from-cyan-500 to-indigo-600 text-white shadow-lg shadow-cyan-500/20">
-            <Sparkles className="w-5 h-5" />
-          </div>
+          <button
+            onClick={() => setIsPresetSidebarOpen(!isPresetSidebarOpen)}
+            className="p-1.5 rounded-lg bg-gradient-to-tr from-cyan-500 to-indigo-600 text-white shadow-lg shadow-cyan-500/20 hover:scale-105 transition cursor-pointer"
+            title="Open Preset & Node Template Library"
+          >
+            <Bookmark className="w-5 h-5" />
+          </button>
           <div>
             <h1 className="text-sm font-semibold tracking-wide flex items-center gap-2 m-0 p-0">
               Procedural Creature Raymarching Studio
@@ -168,7 +232,7 @@ export const App: React.FC = () => {
               </span>
             </h1>
             <p className="text-[11px] text-slate-400 m-0">
-              Ollama Weights • GLSL Monaco Node Graph • 3D HRTF Spatial Audio
+              Ollama Weights • GLSL Monaco Node Graph • 3D HRTF Spatial Audio • Timeline Loops
             </p>
           </div>
         </div>
@@ -201,8 +265,24 @@ export const App: React.FC = () => {
           </button>
         </div>
 
-        {/* Action Controls */}
+        {/* Action Controls & New Feature Toggles */}
         <div className="flex items-center gap-2">
+          {/* Preset Library Toggle */}
+          <button
+            onClick={() => setIsPresetSidebarOpen(true)}
+            className="flex items-center gap-1.5 px-2.5 py-1 text-xs rounded border border-cyan-800/80 bg-cyan-950/40 text-cyan-300 hover:bg-cyan-900/50 transition cursor-pointer"
+          >
+            <Bookmark className="w-3.5 h-3.5 text-cyan-400" /> Presets
+          </button>
+
+          {/* Multi-Model Inspector Overlay */}
+          <button
+            onClick={() => setIsInspectorOpen(true)}
+            className="flex items-center gap-1.5 px-2.5 py-1 text-xs rounded border border-purple-800/80 bg-purple-950/40 text-purple-300 hover:bg-purple-900/50 transition cursor-pointer"
+          >
+            <ArrowRightLeft className="w-3.5 h-3.5 text-purple-400" /> Multi-Model Inspector
+          </button>
+
           <button
             onClick={() => setShowMeshOverlay(!showMeshOverlay)}
             className={`flex items-center gap-1.5 px-2.5 py-1 text-xs rounded border transition cursor-pointer ${
@@ -276,6 +356,8 @@ export const App: React.FC = () => {
               entropy={metrics.entropy}
               latencyMs={metrics.latencyMs}
               showMeshOverlay={showMeshOverlay}
+              timelineOverrideTime={timelineOverrideTime}
+              camOrbitOverride={camOrbitOverride}
               onError={setShaderError}
             />
           </div>
@@ -391,6 +473,14 @@ export const App: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* Bottom Dock: Keyframe Timeline Recording Interface */}
+      <KeyframeTimeline
+        creatureParams={creatureParams}
+        currentEntropy={metrics.entropy}
+        currentLatency={metrics.latencyMs}
+        onApplyTimelineState={handleApplyTimelineState}
+      />
     </div>
   );
 };
