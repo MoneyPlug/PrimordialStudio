@@ -1,11 +1,25 @@
 import * as dgram from 'dgram';
 import { WebSocketServer, WebSocket } from 'ws';
 
+export type CreatureCoords = [number, number, number, number, number];
+// [x, y, z, state, hunger]
+
+export interface BarrierData {
+  id: string;
+  type: string;
+  position: [number, number, number];
+  radius: number;
+  health: number;
+}
+
 export interface SimulationTelemetry {
   populationDensity: number;
   societalStress: number;
   territoryCenter: [number, number, number];
   phaseCode: number;
+  creatures: CreatureCoords[];
+  barriers?: BarrierData[];
+  isCrisis?: boolean;
 }
 
 export class SimulationTelemetryBridge {
@@ -18,6 +32,16 @@ export class SimulationTelemetryBridge {
     societalStress: 0.0,
     territoryCenter: [0.0, 0.0, 0.0],
     phaseCode: 2.2,
+    creatures: [
+      [-2.0, 0.0, -1.5, 0, 0.2],
+      [2.2, 0.5, 1.8, 1, 0.4],
+      [0.0, -0.2, 3.0, 2, 0.8],
+    ],
+    barriers: [
+      { id: 'barrier_repeat_1', type: 'grid_repetition', position: [-3.0, 0.0, -1.0], radius: 1.4, health: 80 },
+      { id: 'barrier_intersect_1', type: 'barrier_intersection', position: [3.0, 0.0, 1.0], radius: 1.4, health: 80 },
+    ],
+    isCrisis: false,
   };
   private syncInterval: any = null;
 
@@ -32,10 +56,13 @@ export class SimulationTelemetryBridge {
       try {
         const packet = JSON.parse(msg.toString());
         this.latestTelemetry = {
-          populationDensity: packet.density ?? 1.0,
-          societalStress: packet.stress ?? 0.0,
-          territoryCenter: packet.center ?? [0.0, 0.0, 0.0],
-          phaseCode: 2.2,
+          populationDensity: packet.density ?? this.latestTelemetry.populationDensity,
+          societalStress: packet.stress ?? this.latestTelemetry.societalStress,
+          territoryCenter: packet.center ?? this.latestTelemetry.territoryCenter,
+          phaseCode: packet.phaseCode ?? 2.2,
+          creatures: packet.creatures ?? this.latestTelemetry.creatures,
+          barriers: packet.barriers ?? this.latestTelemetry.barriers,
+          isCrisis: packet.isCrisis ?? this.latestTelemetry.isCrisis,
         };
       } catch (err) {
         console.error('[Telemetry Bridge] Failed to parse UDP packet:', err);
